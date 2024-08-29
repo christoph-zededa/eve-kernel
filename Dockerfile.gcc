@@ -19,7 +19,8 @@ RUN apk add make flex bison elfutils-dev openssl-dev findutils diffutils perl cc
     python3 \
     openssl \
     linux-headers \
-    rsync
+    rsync \
+    tar
 
 ARG TARGETARCH
 ARG BUILDPLATFORM
@@ -187,7 +188,7 @@ RUN DVER=$(basename "$(find /tmp/kernel-modules/lib/modules/ -mindepth 1 -maxdep
 RUN ( DVER=$(basename $(find /tmp/kernel-modules/lib/modules/ -mindepth 1 -maxdepth 1)) && \
       cd /tmp/kernel-modules/lib/modules/$DVER && \
       rm build source && \
-      ln -s /usr/src/linux-headers-$DVER build ) && \
+      ln -s /usr/src/linux-$DVER build ) && \
     ( cd /tmp/kernel-modules && tar cf /out/kernel.tar . )
 
 # Headers (userspace API)
@@ -209,11 +210,23 @@ RUN DVER=$(basename $(find /tmp/kernel-modules/lib/modules/ -mindepth 1 -maxdept
          tar cf - -T - | (cd $dir; tar xf -) && \
     ( cd /tmp && tar cf /out/kernel-dev.tar usr/src )
 
+# Kernel source code
+WORKDIR /kernel-src
+#RUN make clean
+RUN make kernelversion
+RUN --mount=type=cache,target=/root/.cache/ccache,id=kernel-ccache-${TARGETARCH} \
+    make CC="${CC}" O=/kernel-out LOCALVERSION="-${LOCALVERSION}" -j$(nproc) prepare
+#RUN rm -Rf .cache .git tools Documentation
+#RUN cp -Rf /kernel-out/include/generated /kernel-src/include/
+RUN DVER=$(basename $(find /tmp/kernel-modules/lib/modules/ -mindepth 1 -maxdepth 1)); tar --transform "s,^\.,usr/src/linux-$DVER," -cf /out/kernel-src.tar .
+RUN date > /out/date.txt # TODO: removeme
+RUN DVER=$(make kernelversion); tar --transform "s,^\.,usr/src/linux-$DVER," -cf /out/kernel-src.tar .
+
 FROM scratch
 ENTRYPOINT []
 CMD []
 WORKDIR /
 # copy SBOM files
-COPY kernel-sbom-docker.spdx.json /out
-COPY kernel-sbom-gh.spdx.json /out/
+COPY kernel-sbom-docker.spdx.json /
+COPY kernel-sbom-gh.spdx.json /
 COPY --from=artifacts /out/* /
